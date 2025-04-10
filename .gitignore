@@ -1,0 +1,25 @@
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+*.env
+.venv/
+
+# OS specific
+.DS_Store
+
+# Data Files (Important - prevent committing large/sensitive data)
+*.csv
+*.png
+
+# IDE/Editor specific
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/ 
