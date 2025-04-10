@@ -66,12 +66,12 @@ if lm:
     summary_prompt_template = ChatPromptTemplate.from_template(
         """
         Analyze the following data which is being used to generate a chart titled '{chart_description}'.
-        The data represents counts or frequencies based on filtered user reviews for the Sekai app.
+        The data represents counts and potentially percentages (normalized frequencies) based on filtered user reviews for the Sekai app.
         
-        Data:
+        Data (Counts and Percentages):
         {data_string}
         
-        Provide a concise 1-2 sentence summary highlighting the key insights, dominant categories, or notable distributions based *only* on this provided data. Focus on the most important takeaways a product manager would want to know quickly from this chart data.
+        Provide a concise 1-2 sentence summary highlighting the key insights, dominant categories, or notable distributions based *only* on this provided data. **Prefer using percentages** when describing proportions or distributions. Mention the top 1-2 items/categories if applicable. Focus on the most important takeaways a product manager would want to know quickly from this chart data.
         Be objective and data-driven in your summary.
         Summary:
         """
@@ -100,8 +100,8 @@ if lm:
         1.  Identify the top 3-5 recurring themes or categories of feature requests.
         2.  For each theme, provide a brief qualitative assessment:
             *   **Theme:** (e.g., Improved Character Consistency)
-            *   **Potential Reach:** (e.g., Seems frequently mentioned, suggesting moderate reach; Mentioned occasionally)
-            *   **Potential Impact:** (e.g., Users describe this as highly frustrating/critical, suggesting high impact; Seems like a quality-of-life improvement, suggesting medium impact)
+            *   **Potential Reach:** (e.g., Seems frequently mentioned, suggesting moderate reach; Mentioned occasionally) - *Briefly justify based on list frequency.*
+            *   **Potential Impact:** (e.g., Users describe this as highly frustrating/critical, suggesting high impact; Seems like a quality-of-life improvement, suggesting medium impact) - *Briefly justify based on user language in requests.*
             *   **Confidence (from list frequency):** (e.g., High - appears many times in this list; Medium - appears several times; Low - appears once or twice)
             *   **Effort:** Cannot be determined from reviews; requires team input.
         3.  Provide a 1-2 sentence concluding summary identifying the most prominent request themes emerging from this specific list.
@@ -122,20 +122,30 @@ def generate_chart_summary(chart_data_series, chart_description):
     if summary_chain is None or chart_data_series is None or chart_data_series.empty:
         return "*Summary generation disabled or no data available.*"
         
-    # Prepare data string (limit length if necessary)
-    # Convert Series/DataFrame to string, handle potential large data
-    if isinstance(chart_data_series, pd.Series):
-        data_string = chart_data_series.head(15).to_string() # Limit for prompt
-    elif isinstance(chart_data_series, pd.DataFrame):
-         data_string = chart_data_series.head(15).to_string() # Limit for prompt
-    else:
-        data_string = str(chart_data_series)
-        
-    if len(data_string) > 1500: # Add length limit safeguard
-        data_string = data_string[:1500] + "... (truncated)"
+    # Prepare data string including percentages
+    data_string = ""
+    try:
+        if isinstance(chart_data_series, pd.Series):
+            # Calculate percentages
+            percentages = chart_data_series.div(chart_data_series.sum()).mul(100).round(1)
+            # Combine counts and percentages into a single string representation
+            combined_df = pd.DataFrame({'Count': chart_data_series, 'Percentage': percentages})
+            data_string = combined_df.head(15).to_string() # Limit for prompt
+        elif isinstance(chart_data_series, pd.DataFrame):
+             # Assuming DataFrame might already have counts/percentages or just needs head
+             data_string = chart_data_series.head(15).to_string() 
+        else:
+            data_string = str(chart_data_series)
+            
+        if len(data_string) > 1500:
+            data_string = data_string[:1500] + "... (truncated)"
+            
+    except Exception as e:
+        print(f"Error preparing data string for summary: {e}")
+        data_string = chart_data_series.head(15).to_string() # Fallback
         
     try:
-        print(f"Requesting summary for: {chart_description}") # Log when actually calling API
+        print(f"Requesting summary for: {chart_description}")
         summary = summary_chain.invoke({"chart_description": chart_description, "data_string": data_string})
         return summary
     except Exception as e:
@@ -177,6 +187,70 @@ def generate_feature_request_analysis(feature_requests_df):
              user_facing_error = "Could not generate analysis: Check API credit balance."
         elif "api key" in error_message.lower():
              user_facing_error = "Could not generate analysis: Check API key configuration."
+        return f"*{user_facing_error}*"
+
+@st.cache_data(max_entries=10)
+def generate_overall_summary(filtered_df):
+    """Generates an overall summary of the filtered data."""
+    if lm is None or filtered_df is None or filtered_df.empty:
+        return "*Overall summary disabled or no data to summarize.*"
+
+    # --- Prepare summary statistics from the filtered data ---
+    summary_lines = []
+    total_reviews = len(filtered_df)
+    summary_lines.append(f"- Total Reviews in Filter: {total_reviews}")
+
+    if 'sentiment' in filtered_df.columns:
+        sentiment_dist = filtered_df['sentiment'].value_counts(normalize=True).mul(100).round(1)
+        summary_lines.append(f"- Sentiment Breakdown (%):\n{sentiment_dist.head().to_string()}")
+    
+    if 'primary_topic' in filtered_df.columns:
+        top_topics = filtered_df['primary_topic'].value_counts().head(5)
+        summary_lines.append(f"- Top Primary Topics:\n{top_topics.to_string()}")
+        
+    if 'sub_topics_list' in filtered_df.columns:
+        sub_topic_counts = filtered_df.explode('sub_topics_list').dropna(subset=['sub_topics_list'])['sub_topics_list'].value_counts().head(5)
+        if not sub_topic_counts.empty:
+             summary_lines.append(f"- Top Sub-Topics:\n{sub_topic_counts.to_string()}")
+             
+    if 'pain_points_list' in filtered_df.columns:
+         pain_point_counts = filtered_df.explode('pain_points_list').dropna(subset=['pain_points_list'])['pain_points_list'].value_counts().head(5)
+         if not pain_point_counts.empty:
+             summary_lines.append(f"- Top Pain Points:\n{pain_point_counts.to_string()}")
+             
+    # Combine into a single string for the prompt
+    data_summary_string = "\n".join(summary_lines)
+    
+    # Limit length
+    if len(data_summary_string) > 2000:
+        data_summary_string = data_summary_string[:2000] + "... (truncated)"
+
+    # --- Define Prompt (Refined) ---
+    overall_summary_prompt_template = ChatPromptTemplate.from_template(
+        """
+        You are analyzing a statistical summary derived from filtered user reviews for the Sekai app.
+        Here is the summary, which includes counts and percentage breakdowns:
+        {data_summary}
+        
+        Based *only* on this statistical summary, provide a concise 2-3 sentence high-level overview for a product manager. **Emphasize percentages** when discussing distributions (like sentiment). Focus on the most significant findings regarding overall sentiment, key topics, and major pain points within this filtered subset of reviews.
+        
+        Overall Summary:
+        """
+    )
+    overall_summary_chain = overall_summary_prompt_template | lm | summary_parser
+
+    # --- Invoke LLM ---
+    try:
+        print("Requesting overall summary...")
+        overall_summary = overall_summary_chain.invoke({"data_summary": data_summary_string})
+        return overall_summary
+    except Exception as e:
+        print(f"Error generating overall summary: {e}")
+        error_message = str(e)
+        user_facing_error = "Could not generate overall summary due to an API error."
+        if "credit balance" in error_message.lower():
+             user_facing_error = "Could not generate summary: Check API credit balance."
+        # ... other error checks ...
         return f"*{user_facing_error}*"
 
 # --- Load and Cache Data ---
@@ -338,6 +412,17 @@ if df_filtered is not None and not df_filtered.empty:
     else:
         dominant_sentiment = "N/A"
     m_col3.metric("Dominant Sentiment", dominant_sentiment)
+
+    st.divider()
+
+    # --- NEW: Overall AI Summary Section ---
+    st.header("Overall Filtered Data Summary (AI Generated)")
+    if st.button("Generate Overall Summary for Filtered Data", key="overall_summary_btn"):
+        with st.spinner("Generating overall summary..."):
+            overall_summary_text = generate_overall_summary(df_filtered)
+        st.markdown(overall_summary_text)
+    else:
+        st.info("Click the button to generate an AI summary of the currently filtered data.")
 
     st.divider()
 
