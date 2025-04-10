@@ -55,3 +55,36 @@ Here's an explanation of the methodology used to create this dashboard and deriv
     *   **Caching:** These AI calls within the dashboard use Streamlit's caching (`@st.cache_data`, `@st.cache_resource`) to store results and avoid redundant API calls if the underlying filtered data hasn't changed, improving performance and reducing cost.
 
 In essence, the methodology uses AI in two phases: first, a structured batch analysis to tag and categorize every review, and second, dynamic AI analysis within the dashboard to summarize and interpret the *filtered results* of the first phase in response to user interaction.
+
+
+Next Steps for Improvement (Prioritized)
+To evolve this dashboard into a robust, reliable internal tool for Sekai:
+High Priority (Foundation for Internal Use):
+Database Backend (Replace CSVs):
+Action: Migrate data storage from CSV files to a SQL database (e.g., PostgreSQL). Update analyze_reviews.py to write to the DB and dashboard.py to query it.
+Why: Crucial for performance (especially filtering), scalability, concurrent access reliability, data integrity, and easier integration with other potential tools.
+Pipeline Automation & Monitoring:
+Action: Schedule the update_reviews.sh script (fetching & analysis) to run automatically (e.g., daily) using cron, GitHub Actions, or a similar task scheduler. Implement robust error handling (try/except blocks around critical steps) and basic notifications (e.g., Slack webhook via curl in the shell script) on failure.
+Why: Ensures data freshness without manual effort and provides visibility into pipeline health.
+Deployment & Authentication:
+Action: Deploy the Streamlit app to a persistent web server (internal server, Streamlit Community Cloud, AWS/GCP/Azure
+service). Implement access control (e.g., password protection, company SSO integration) so only authorized Sekai employees can view it.
+Why: Makes the dashboard easily accessible to the team while protecting potentially sensitive review data/analysis.
+Restore Incremental Analysis:
+Action: Revert the temporary changes made to analyze_reviews.py (re-enable existing key checking, change save mode back to 'a'ppend).
+Why: Essential for efficient and cost-effective future updates; avoids unnecessary re-processing of old reviews and high API costs.
+Medium Priority (Improving Maintainability & Data Context):
+Configuration Management:
+Action: Move API keys, database connection details (once migrated), file paths, and model names into environment variables or a configuration file (.env, config.yaml). Ensure API keys are securely managed (not in code/git).
+Why: Improves security and makes configuration easier across different environments (local vs. deployment).
+Code Quality & Documentation:
+Action: Create requirements.txt (pip3 freeze > requirements.txt). Add comments/docstrings explaining complex logic. Create a README.md explaining setup, how to run the pipeline and
+Why: Makes the project easier for others (or future you) to understand, set up, and maintain.
+Data Enrichment (if feasible):
+Action: Investigate if appVersion and device information can be reliably extracted by the scraping libraries. If so, modify fetching and analysis scripts to include them, and ensure the dashboard filters work.
+Why: Allows for deeper analysis to correlate feedback with specific app versions or device types.
+Lower Priority (Advanced Features & UX Enhancements):
+Deeper Analytics: Explore Sentiment Intensity analysis again, Competitor Comparison analysis (complex), or integrating Word Cloud stopwords.
+Interactive Charts: Replace static charts with Plotly or Altair for enhanced exploration capabilities (hover, zoom).
+Dashboard UX: Add saved filter views, better in-app help text/documentation.
+This provides a clear path from the current functional dashboard to a more professional, automated, and robust internal analytics tool.
